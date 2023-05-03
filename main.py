@@ -2,8 +2,8 @@ import cv2
 import numpy
 from colorthief import ColorThief
 import colorsys
-from ultralytics import YOLO
 
+from ultralytics import YOLO
 
 sensitivity = 15
 background_size = 2500
@@ -29,7 +29,7 @@ def main_color_hsv(filename):
     return int(color_hsv[0] * 179), int(color_hsv[1] * 255), int(color_hsv[2] * 255)
 
 
-def find_mask_background():
+def find_mask_background(dominate_color_hsv, image_hsv):
     lower_color = numpy.array(
         (dominate_color_hsv[0] - sensitivity, dominate_color_hsv[1] - sensitivity, dominate_color_hsv[2] - sensitivity))
     upper_color = numpy.array(
@@ -41,8 +41,8 @@ def find_background_pixel_size():
     upper = background.shape[0]
     lower = 0
     background_gray = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
-    ret, background_tresh = cv2.threshold(background_gray, 100, 255, cv2.THRESH_BINARY)
-    contours, hierarchy = cv2.findContours(background_tresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    ret, background_thresh = cv2.threshold(background_gray, 100, 255, cv2.THRESH_BINARY)
+    contours, hierarchy = cv2.findContours(background_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     for value in contours:
         x, y, w, h = cv2.boundingRect(value)
@@ -59,7 +59,7 @@ def find_background_pixel_size():
 
 def yolov8_detect():
     height, width, channels = image.shape
-    model = YOLO("yolov8x-seg.pt")
+    model = YOLO("yolov8-seg.pt")
 
     results = model(image)
     result = results[0]
@@ -75,32 +75,39 @@ def yolov8_detect():
     return boxes, class_ids, segmentation_contours_idx
 
 
-def find_height_human():
+def find_height_human(human_pixel_size, background_pixel_size):
     return human_pixel_size * background_size / background_pixel_size
 
 
-if __name__ == '__main__':
-    image = cv2.imread(path_image)
-
+def detect_image(image):
+    human_pixel_size = 0
     dominate_color_hsv = main_color_hsv(path_image)
 
     image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-    mask_background = find_mask_background()
+    mask_background = find_mask_background(dominate_color_hsv, image_hsv)
     background = cv2.bitwise_and(image_hsv, image_hsv, mask=mask_background)
     background = cv2.cvtColor(background, cv2.COLOR_HSV2BGR)
 
     background_pixel_size = find_background_pixel_size()
 
-    bg = numpy.zeros((image.shape[0], image.shape[1], 3), numpy.uint8)
-    bg[:, :] = COLOR_LIGHT_BLUE
+    human = numpy.zeros((image.shape[0], image.shape[1], 3), numpy.uint8)
+    human[:, :] = COLOR_LIGHT_BLUE
     boxes, classes, segmentations = yolov8_detect()
     for box, class_id, seg in zip(boxes, classes, segmentations):
         (x, y, x2, y2) = box
         if class_id == 0:
             human_pixel_size = y2 - y
-            cv2.polylines(bg, [seg], True, COLOR_BLUE, 4)
+            cv2.polylines(human, [seg], True, COLOR_BLUE, 4)
 
-    print(find_height_human())
-    cv2.imwrite(path_human, bg)
+    return human, background, find_height_human(human_pixel_size, background_pixel_size)
+
+
+if __name__ == '__main__':
+    image = cv2.imread(path_image)
+
+    human, background, height = detect_image(image)
+
+    print(height)
+    cv2.imwrite(path_human, human)
     cv2.imwrite(path_background, background)
